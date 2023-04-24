@@ -5,7 +5,7 @@ import (
 )
 
 type Context struct {
-	ctx      context.Context
+	context.Context
 	Request  *Request
 	Response *Response
 }
