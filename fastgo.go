@@ -18,6 +18,7 @@ func NewApp(appId string) *App {
 func (a *App) SetMiddleware(ws []Middleware) {
 	a.middlewares = ws
 }
+
 func (a *App) SetServer(s *Server) {
 	a.server = s
 }
@@ -27,5 +28,8 @@ func (a *App) SetRouter(r *Router) {
 }
 
 func (a *App) Run() error {
-	return a.server.Run(a.router.serveMux)
+	if a.server == nil {
+		panic("server 未设置")
+	}
+	return a.server.Run(a.router.register(a.middlewares))
 }

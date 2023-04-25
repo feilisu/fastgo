@@ -1,21 +1,26 @@
 package fastgo
 
-type MiddlewareParam struct {
-}
-
-type MiddlewareRes struct {
-}
+import "log"
 
 type Middleware interface {
-	Run(p MiddlewareParam) (res MiddlewareRes)
+	Exec(ctx *Context) error
 }
 
-var (
-	Middlewares []Middleware
-)
+type MiddlewareFunc func(*Context) error
 
-func MiddlewareRun(p MiddlewareParam) {
-	for _, m := range Middlewares {
-		m.Run(p)
-	}
+func (f MiddlewareFunc) Exec(ctx *Context) error {
+	return f(ctx)
+}
+
+func Mtest1(ctx *Context) error {
+	log.Print("Mtest1")
+	return nil
+}
+
+type Mtest2 struct {
+}
+
+func (m *Mtest2) Exec(ctx *Context) error {
+	log.Print("Mtest2")
+	return nil
 }

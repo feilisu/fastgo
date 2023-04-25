@@ -5,6 +5,13 @@ import (
 	"log"
 )
 
+type User struct {
+}
+
+func (u User) GetName(ctx *fastgo.Context) error {
+	return ctx.Response.Json("费力苏")
+}
+
 func main() {
 	defer func() {
 		msg := recover()
@@ -14,14 +21,21 @@ func main() {
 	}()
 
 	app := fastgo.NewApp("测试应用1")
+	app.SetMiddleware([]fastgo.Middleware{
+		fastgo.MiddlewareFunc(fastgo.Mtest1),
+		new(fastgo.Mtest2),
+	})
 	r := fastgo.NewRouter()
-	r.Host("http://127.0.0.1").Path("/info").GET(func(ctx *fastgo.Context) {
+	r.Host("127.0.0.1").Path("/info").GET(fastgo.HandlerFunc(func(ctx *fastgo.Context) error {
 		err := ctx.Response.Text("你好")
 		if err != nil {
 			log.Println(err)
-			return
+			return err
 		}
-	})
+		return nil
+	}))
+
+	r.Host("127.0.0.1").Path("/user/name").GET(fastgo.HandlerFunc(User{}.GetName))
 	app.SetRouter(r)
 
 	err := app.Run()

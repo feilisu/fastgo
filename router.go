@@ -2,7 +2,9 @@ package fastgo
 
 import (
 	"context"
+	"log"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"time"
 )
@@ -17,6 +19,16 @@ const ANY = "*"
 
 var defaultHost = "default"
 
+type Handler interface {
+	Handle(ctx *Context) error
+}
+
+type HandlerFunc func(ctx *Context) error
+
+func (hf HandlerFunc) Handle(ctx *Context) error {
+	return hf(ctx)
+}
+
 type Router struct {
 	serveMux *http.ServeMux
 	entry    Entry
@@ -24,28 +36,27 @@ type Router struct {
 }
 
 type Entry struct {
-	h      string
-	p      string
-	ms     []string
-	handle RouterHandler
+	host        string
+	path        string
+	methods     []string
+	middlewares []Middleware
+	handle      Handler
 }
 
 func NewRouter() *Router {
 	return new(Router)
 }
 
-type RouterHandler func(ctx *Context)
-
 func (f *Router) Host(h string) *Router {
-	if len(f.entry.p) > 0 {
+	if len(f.entry.path) > 0 {
 		panic("host should init before init path")
 	}
-	f.entry.h = h
+	f.entry.host = h
 	return f
 }
 
 func (f *Router) Tree(call func(f *Router)) {
-	if f.entry.p == "" {
+	if f.entry.path == "" {
 		panic("path should init before init Tree")
 	}
 	call(f)
@@ -62,12 +73,17 @@ func (f *Router) Path(p string) *Router {
 			continue
 		}
 		strings.Trim(s, "/")
-		f.entry.p = f.entry.p + "/" + s
+		f.entry.path = f.entry.path + "/" + s
 	}
 	return f
 }
 
-func (f *Router) Method(ms []string, handle RouterHandler) {
+func (f *Router) Middleware(ms []Middleware) *Router {
+	f.entry.middlewares = ms
+	return f
+}
+
+func (f *Router) method(ms []string, handle Handler) {
 	if ms == nil {
 		panic("method not is nil")
 	}
@@ -77,16 +93,16 @@ func (f *Router) Method(ms []string, handle RouterHandler) {
 	if handle == nil {
 		panic("handle not is nil")
 	}
-	if len(f.entry.p) <= 0 {
+	if len(f.entry.path) <= 0 {
 		panic("handle should init after init path")
 	}
 
-	f.entry.ms = ms
+	f.entry.methods = ms
 	f.entry.handle = handle
 
 	host := defaultHost
-	if len(f.entry.h) > 0 {
-		host = f.entry.h
+	if len(f.entry.host) > 0 {
+		host = f.entry.host
 	}
 	if f.entryMap == nil {
 		f.entryMap = make(map[string][]Entry)
@@ -96,54 +112,85 @@ func (f *Router) Method(ms []string, handle RouterHandler) {
 
 }
 
-func (f *Router) GET(handle RouterHandler) {
-	f.Method([]string{GET}, handle)
+func (f *Router) GET(handle Handler) {
+	f.method([]string{GET}, handle)
 }
 
-func (f *Router) POST(handle RouterHandler) {
-	f.Method([]string{POST}, handle)
+func (f *Router) POST(handle Handler) {
+	f.method([]string{POST}, handle)
 }
 
-func (f *Router) DELETE(handle RouterHandler) {
-	f.Method([]string{DELETE}, handle)
+func (f *Router) DELETE(handle Handler) {
+	f.method([]string{DELETE}, handle)
 }
 
-func (f *Router) PUT(handle RouterHandler) {
-	f.Method([]string{PUT}, handle)
+func (f *Router) PUT(handle Handler) {
+	f.method([]string{PUT}, handle)
 }
 
-func (f *Router) HEAD(handle RouterHandler) {
-	f.Method([]string{HEAD}, handle)
+func (f *Router) HEAD(handle Handler) {
+	f.method([]string{HEAD}, handle)
 }
 
-func (f *Router) ANY(handle RouterHandler) {
-	f.Method([]string{ANY}, handle)
+func (f *Router) ANY(handle Handler) {
+	f.method([]string{ANY}, handle)
 }
 
-func (f *Router) register() {
+func (f *Router) register(ms []Middleware) *http.ServeMux {
 
 	f.serveMux = http.NewServeMux()
 	if f.entryMap != nil {
 		for host, entryList := range f.entryMap {
-			serveMux := http.NewServeMux()
 			for _, entry := range entryList {
-				serveMux.Handle(entry.p, getHandler(entry))
+				log.Printf("%s %s %s", entry.methods, host, entry.path)
+
+				var url string
+				if entry.host == defaultHost {
+					url = entry.path
+				} else {
+					url = host + entry.path
+				}
+
+				f.serveMux.Handle(url, getHandler(entry, ms))
 			}
-			f.serveMux.Handle(host, serveMux)
 		}
 	}
+
+	f.serveMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+	f.serveMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+	f.serveMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+	f.serveMux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+
+	return f.serveMux
 }
 
-func getHandler(entry Entry) http.HandlerFunc {
+func getHandler(entry Entry, middlewares []Middleware) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		ctx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancelFunc()
-		fastGoContext := &Context{
-			Context:  ctx,
-			Request:  &Request{r},
-			Response: &Response{w},
+
+		if entry.middlewares != nil {
+			middlewares = append(middlewares, entry.middlewares...)
 		}
-		entry.handle(fastGoContext)
+
+		fctx := &Context{
+			Context:     ctx,
+			Request:     &Request{r},
+			Response:    &Response{w},
+			Middlewares: middlewares,
+		}
+
+		err := fctx.ExecMiddleware()
+		if err != nil {
+			_ = fctx.Response.Json(err)
+			return
+		}
+
+		err = entry.handle.Handle(fctx)
+		if err != nil {
+			_ = fctx.Response.Json(err)
+			return
+		}
 	})
 }
