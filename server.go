@@ -18,7 +18,7 @@ type Server struct {
 func NewServer() *Server {
 	return &Server{
 		addr:         "0.0.0.0",
-		port:         "88",
+		port:         "80",
 		readTimeout:  5 * time.Second,
 		writeTimeout: 5 * time.Second,
 		errorLog:     GetLogger(),

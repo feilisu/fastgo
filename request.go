@@ -3,16 +3,28 @@ package fastgo
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
 type Request struct {
 	*http.Request
 }
+
+const (
+	APPLICATION_JSON      = "application/json"
+	TEXT_HTML             = "text/html"
+	APPLICATION_XML       = "application/xml"
+	TEXT_XML              = "text/xml"
+	TEXT_PLAIN            = "text/plain"
+	X_WWW_FORM_URLENCODED = "application/x-www-form-urlencoded"
+	MULTIPART_FORM_DATA   = "multipart/form-data"
+)
+
+const defaultMaxMemory int64 = 30 << 20
 
 // getString
 func (r *Request) getString(key string) string {
@@ -32,92 +44,85 @@ func (r *Request) GetJsonBody() string {
 //	log.Println(r.postJsonParams())
 //}
 
-func (r *Request) params() url.Values {
+func (r *Request) Params(param any) {
 
 	if r.Method == http.MethodGet {
-		return r.URL.Query()
+		r.bind(param, r.URL.Query())
+		return
 	}
 	if r.Method == http.MethodPost {
 		hv := r.Header.Get("Content-Type")
-		if strings.Contains(hv, "multipart/form-data") {
-			err := r.ParseMultipartForm(30 << 20)
+		if strings.Contains(hv, MULTIPART_FORM_DATA) {
+			err := r.ParseMultipartForm(defaultMaxMemory)
 			if err != nil {
-				return nil
+				return
 			}
 		}
 
-		if strings.Contains(hv, "application/x-www-form-urlencoded") {
+		if strings.Contains(hv, X_WWW_FORM_URLENCODED) {
 			err := r.ParseForm()
 			if err != nil {
-				return nil
+				return
 			}
 		}
 
-		//if strings.Contains(hv, "application/json") {
-		//
-		//}
-		return r.Form
-	}
-	return nil
-}
+		if strings.Contains(hv, APPLICATION_JSON) {
+			err := json.NewDecoder(r.Body).Decode(param)
+			if err != nil {
+				return
+			}
+		}
 
-func (r *Request) PostJsonParams(par any) any {
-	var pp any
-
-	err := json.NewDecoder(r.Body).Decode(&pp)
-	if err != nil {
-		return nil
-	}
-	tar := reflect.ValueOf(par).Elem()
-	src := reflect.ValueOf(pp)
-	if tar.Kind() == reflect.Struct {
-		bindStruct(src, tar)
-	}
-	log.Println(src.Kind())
-	log.Println(tar.Kind())
-	return pp
-}
-
-func bindStruct(src reflect.Value, tar reflect.Value) {
-	if src.Kind() != reflect.Map {
+		r.bind(param, r.Form)
 		return
 	}
+	return
+}
 
-	mkv := make(map[string]reflect.Value)
-	mapIterator := src.MapRange()
-	for mapIterator.Next() {
-		mkv[mapIterator.Key().Type().Name()] = mapIterator.Value()
-	}
+func (r *Request) bind(param any, values url.Values) {
+	paramValue := reflect.ValueOf(param).Elem()
+	for i := 0; i < paramValue.Type().NumField(); i++ {
 
-	for i := 0; i < tar.Type().NumField(); i++ {
-
-		field := tar.Type().Field(i)
-		v, ok := mkv[field.Name]
+		field := paramValue.Type().Field(i)
+		vs, ok := values[field.Name]
 		if !ok {
 			continue
 		}
 
-		log.Println()
+		if vs == nil {
+			continue
+		}
+
+		fieldValue := paramValue.FieldByName(field.Name)
+		if !fieldValue.CanSet() {
+			continue
+		}
+
 		switch field.Type.Kind() {
 		case reflect.Struct:
-			bindStruct(v, field)
 		case reflect.Map:
-			bindMap(v, field.Type)
 		case reflect.Slice:
-			bindSplice(v, field.Type)
 		case reflect.String:
-
+			fieldValue.SetString(vs[0])
 		case reflect.Int64:
-
+			i, _ := strconv.ParseInt(vs[0], 10, 64)
+			fieldValue.SetInt(i)
 		}
-		//src.FieldByName()
 	}
-
-}
-func bindMap(src reflect.Value, tar reflect.Value) {
-
 }
 
-func bindSplice(src reflect.Value, tar reflect.Value) {
-
-}
+//func parseType(src reflect.Value, tar reflect.Value) {
+//
+//	p := src.UnsafePointer()
+//	switch src.Kind() {
+//	case Int:
+//		return int64(*(*int)(p))
+//	case Int8:
+//		return int64(*(*int8)(p))
+//	case Int16:
+//		return int64(*(*int16)(p))
+//	case Int32:
+//		return int64(*(*int32)(p))
+//	case Int64:
+//	}
+//}

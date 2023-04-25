@@ -15,7 +15,8 @@ type User struct {
 
 func (u User) GetName(ctx *fastgo.Context) error {
 	str := new(GetUserName)
-	ctx.Request.PostJsonParams(str)
+	ctx.Request.Params(str)
+	log.Println(str.name, str.id)
 	return ctx.Response.Json("费力苏")
 }
 
