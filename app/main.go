@@ -5,10 +5,17 @@ import (
 	"log"
 )
 
+type GetUserName struct {
+	id   int64
+	name string
+}
+
 type User struct {
 }
 
 func (u User) GetName(ctx *fastgo.Context) error {
+	str := new(GetUserName)
+	ctx.Request.PostJsonParams(str)
 	return ctx.Response.Json("费力苏")
 }
 
@@ -35,7 +42,7 @@ func main() {
 		return nil
 	}))
 
-	r.Host("127.0.0.1").Path("/user/name").GET(fastgo.HandlerFunc(User{}.GetName))
+	r.Host("127.0.0.1").Path("/user/name").POST(fastgo.HandlerFunc(User{}.GetName))
 	app.SetRouter(r)
 
 	err := app.Run()
