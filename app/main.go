@@ -6,18 +6,21 @@ import (
 )
 
 type GetUserName struct {
-	id   int64
-	name string
+	Id   int64  `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type User struct {
 }
 
 func (u User) GetName(ctx *fastgo.Context) error {
-	str := new(GetUserName)
-	ctx.Request.Params(str)
-	log.Println(str.name, str.id)
-	return ctx.Response.Json("费力苏")
+	param := new(GetUserName)
+	err := ctx.Request.Params(param)
+	if err != nil {
+		return err
+	}
+	log.Println(param)
+	return ctx.Response.Json("qwe")
 }
 
 func main() {

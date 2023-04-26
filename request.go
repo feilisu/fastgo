@@ -44,42 +44,40 @@ func (r *Request) GetJsonBody() string {
 //	log.Println(r.postJsonParams())
 //}
 
-func (r *Request) Params(param any) {
+func (r *Request) Params(param any) error {
 
 	if r.Method == http.MethodGet {
-		r.bind(param, r.URL.Query())
-		return
+		return r.bind(param, r.URL.Query())
 	}
 	if r.Method == http.MethodPost {
 		hv := r.Header.Get("Content-Type")
 		if strings.Contains(hv, MULTIPART_FORM_DATA) {
-			err := r.ParseMultipartForm(defaultMaxMemory)
-			if err != nil {
-				return
+			if err := r.ParseMultipartForm(defaultMaxMemory); err != nil {
+				return err
 			}
+			return r.bind(param, r.MultipartForm.Value)
 		}
 
 		if strings.Contains(hv, X_WWW_FORM_URLENCODED) {
-			err := r.ParseForm()
-			if err != nil {
-				return
+			if err := r.ParseForm(); err != nil {
+				return err
 			}
+			return r.bind(param, r.Form)
 		}
 
 		if strings.Contains(hv, APPLICATION_JSON) {
-			err := json.NewDecoder(r.Body).Decode(param)
-			if err != nil {
-				return
+			decoder := json.NewDecoder(r.Body)
+			if err := decoder.Decode(param); err != nil {
+				return err
 			}
+			return nil
 		}
-
-		r.bind(param, r.Form)
-		return
 	}
-	return
+
+	return nil
 }
 
-func (r *Request) bind(param any, values url.Values) {
+func (r *Request) bind(param any, values url.Values) error {
 	paramValue := reflect.ValueOf(param).Elem()
 	for i := 0; i < paramValue.Type().NumField(); i++ {
 
@@ -100,29 +98,76 @@ func (r *Request) bind(param any, values url.Values) {
 
 		switch field.Type.Kind() {
 		case reflect.Struct:
+			reflect.MakeMap()
+			field.Type
+			decodeJson(vs[0])
 		case reflect.Map:
 		case reflect.Slice:
+		case reflect.Bool:
+			parseBool, _ := strconv.ParseBool(vs[0])
+			fieldValue.SetBool(parseBool)
 		case reflect.String:
 			fieldValue.SetString(vs[0])
 		case reflect.Int64:
-			i, _ := strconv.ParseInt(vs[0], 10, 64)
-			fieldValue.SetInt(i)
+			_ = stringToInt(vs[0], 64, fieldValue)
+		case reflect.Int32:
+			_ = stringToInt(vs[0], 32, fieldValue)
+		case reflect.Int16:
+			_ = stringToInt(vs[0], 16, fieldValue)
+		case reflect.Int8:
+			_ = stringToInt(vs[0], 8, fieldValue)
+		case reflect.Int:
+			_ = stringToInt(vs[0], 0, fieldValue)
+		case reflect.Uint64:
+			_ = stringToUint(vs[0], 64, fieldValue)
+		case reflect.Uint32:
+			_ = stringToUint(vs[0], 32, fieldValue)
+		case reflect.Uint16:
+			_ = stringToUint(vs[0], 16, fieldValue)
+		case reflect.Uint8:
+			_ = stringToUint(vs[0], 8, fieldValue)
+		case reflect.Uint:
+			_ = stringToUint(vs[0], 0, fieldValue)
+		case reflect.Float64:
+			_ = stringToFloat(vs[0], 64, fieldValue)
+		case reflect.Float32:
+			_ = stringToFloat(vs[0], 32, fieldValue)
 		}
 	}
+	return nil
 }
 
-//func parseType(src reflect.Value, tar reflect.Value) {
-//
-//	p := src.UnsafePointer()
-//	switch src.Kind() {
-//	case Int:
-//		return int64(*(*int)(p))
-//	case Int8:
-//		return int64(*(*int8)(p))
-//	case Int16:
-//		return int64(*(*int16)(p))
-//	case Int32:
-//		return int64(*(*int32)(p))
-//	case Int64:
-//	}
-//}
+func stringToInt(str string, bitSize int, value reflect.Value) error {
+	i, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		return err
+	}
+	value.SetInt(i)
+	return nil
+}
+
+func stringToUint(str string, bitSize int, value reflect.Value) error {
+	i, err := strconv.ParseUint(str, 10, 64)
+	if err != nil {
+		return err
+	}
+	value.SetUint(i)
+	return nil
+}
+
+func stringToFloat(str string, bitSize int, value reflect.Value) error {
+	i, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		return err
+	}
+	value.SetFloat(i)
+	return nil
+}
+
+func decodeJson(bytes string, param any) error {
+	err := json.Unmarshal([]byte(bytes), param)
+	if err != nil {
+		return err
+	}
+	return nil
+}
