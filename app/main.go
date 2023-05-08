@@ -6,8 +6,8 @@ import (
 )
 
 type GetUserName struct {
-	Id   int64  `json:"id,omitempty" default:"456" validate:"required,max=10,mix=1"`
-	Name string `json:"name,omitempty"`
+	Id   int64  `json:"id,omitempty" default:"456" validate:"required,gt=1,lt=100,"`
+	Name string `json:"name,omitempty" validate:"required,lengthGt=1,lengthLt=10"`
 }
 
 type GetUserNameV2 struct {

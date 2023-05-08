@@ -1,7 +1,7 @@
 package fastgo
 
 import (
-	"fastgo/util/fstring"
+	"fastgo/base_type"
 	"reflect"
 	"strconv"
 	"sync"
@@ -79,7 +79,7 @@ func Bind(p any, values map[string]string) error {
 			continue
 		}
 
-		vs, ok := values[fstring.FirstToLow(field.Name)]
+		vs, ok := values[base_type.FirstToLow(field.Name)]
 		if !ok {
 			//是否设置了默认值
 			if rv.defValue == "" {
