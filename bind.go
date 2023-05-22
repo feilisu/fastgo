@@ -4,6 +4,7 @@ import (
 	"fastgo/base_type"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -27,21 +28,24 @@ type reflectField struct {
 	tag      reflect.StructTag
 }
 
-func (c *reflectCache) get(t reflect.Type) *reflectValue {
+func (c *reflectCache) get(t reflect.Type) (rv *reflectValue, err error) {
 
 	c.mux.RLock()
 	rv, ok := c.cache[t]
 	if !ok {
-		rv = c.set(t)
+		rv, err = c.set(t)
 	}
 	c.mux.RUnlock()
-	return rv
+	return
 }
 
-func (c *reflectCache) set(t reflect.Type) *reflectValue {
-	elem := t.Elem()
+func (c *reflectCache) set(t reflect.Type) (rv *reflectValue, err error) {
+	if t.Kind() != reflect.Struct {
+		return nil, NewError("类型必须是struct")
+	}
 
-	rv := new(reflectValue)
+	elem := t.Elem()
+	rv = new(reflectValue)
 
 	for i := 0; i < elem.NumField(); i++ {
 		field := elem.Field(i)
@@ -59,10 +63,17 @@ func (c *reflectCache) set(t reflect.Type) *reflectValue {
 	}
 
 	rCache.cache[t] = rv
-	return rv
+	return
 }
 
-func Bind(p any, values map[string]string) error {
+type Binding struct {
+}
+
+func NewBinding() *Binding {
+	return new(Binding)
+}
+
+func (bi *Binding) Bind(p any, values map[string]string) error {
 	var paramValue reflect.Value
 
 	paramValue = reflect.ValueOf(p)
@@ -70,7 +81,10 @@ func Bind(p any, values map[string]string) error {
 		paramValue = paramValue.Elem()
 	}
 
-	rc := rCache.get(reflect.TypeOf(p))
+	rc, err := rCache.get(reflect.TypeOf(p))
+	if err != nil {
+		return err
+	}
 
 	for _, rv := range rc.fields {
 
@@ -96,7 +110,7 @@ func Bind(p any, values map[string]string) error {
 		switch field.Type.Kind() {
 		case reflect.Struct:
 			if fieldValue.CanAddr() {
-				err := Bind(fieldValue.Addr().Interface(), values)
+				err := bi.Bind(fieldValue.Addr().Interface(), values)
 				if err != nil {
 					return err
 				}
@@ -168,5 +182,117 @@ func stringToFloat(str string, bitSize int, value reflect.Value) error {
 		return err
 	}
 	value.SetFloat(i)
+	return nil
+}
+
+type Validator struct {
+}
+
+func NewValidate() *Validator {
+	return new(Validator)
+}
+
+func (v *Validator) validate(p any) error {
+
+	rc, err := rCache.get(reflect.TypeOf(p))
+	if err != nil {
+		return err
+	}
+
+	var paramValue reflect.Value
+
+	paramValue = reflect.ValueOf(p)
+	if paramValue.Kind() == reflect.Pointer {
+		paramValue = paramValue.Elem()
+	}
+
+	for _, rv := range rc.fields {
+
+		fieldValue := paramValue.FieldByName(rv.name)
+		switch fieldValue.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			i := _int64(fieldValue.Int())
+			err = i.validate(rv.tag.Get("validate"), rv.name, fieldValue.Int(), "")
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		case reflect.String:
+		case reflect.Float32, reflect.Float64:
+		case reflect.Bool:
+		case reflect.Map:
+		case reflect.Slice:
+		case reflect.Struct:
+		}
+
+		if err != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+type _int64 int64
+type _uint64 uint64
+type _float64 float64
+
+func parserTag(tag string) [][]string {
+	if len(tag) <= 0 {
+		return nil
+	}
+
+	var strss [][]string
+	tags := strings.Split(tag, ",")
+	for _, s := range tags {
+		ss := strings.Split(s, "=")
+		strss = append(strss, ss)
+	}
+	return strss
+}
+
+type handler func()
+
+func (i *_int64) validate(tag string, fieldName string, fieldValue int64, msg string) error {
+
+	strss := parserTag(tag)
+
+	for i := 0; i < len(strss); i++ {
+		var rn string
+		var rv int64
+		r := strss[i]
+		rn = r[0]
+		if len(r) > 1 {
+			rv, _ = strconv.ParseInt(r[1], 10, 64)
+		}
+
+		var errorMsg *Error
+
+		switch rn {
+		case "gt":
+			if fieldValue <= rv {
+				errorMsg = NewError(fieldName + "应该大于" + r[1])
+			}
+		case "gte":
+			if fieldValue < rv {
+				errorMsg = NewError(fieldName + "应该大于等于" + r[1])
+			}
+		case "lt":
+			if fieldValue >= rv {
+				errorMsg = NewError(fieldName + "应该小于" + r[1])
+			}
+		case "lte":
+			if fieldValue > rv {
+				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
+			}
+
+		}
+
+		if errorMsg != nil {
+
+			if len(msg) > 0 {
+				errorMsg.SetMsg(msg)
+			}
+			return errorMsg
+		}
+
+	}
+
 	return nil
 }

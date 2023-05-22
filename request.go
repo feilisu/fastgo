@@ -45,7 +45,7 @@ func (r *Request) GetJsonBody() string {
 func (r *Request) Params(param any) error {
 
 	if r.Method == http.MethodGet {
-		return Bind(param, convertValues(r.URL.Query()))
+		return NewBinding().Bind(param, convertValues(r.URL.Query()))
 	}
 	if r.Method == http.MethodPost {
 		hv := r.Header.Get("Content-Type")
@@ -53,14 +53,14 @@ func (r *Request) Params(param any) error {
 			if err := r.ParseMultipartForm(defaultMaxMemory); err != nil {
 				return err
 			}
-			return Bind(param, convertValues(r.MultipartForm.Value))
+			return NewBinding().Bind(param, convertValues(r.MultipartForm.Value))
 		}
 
 		if strings.Contains(hv, X_WWW_FORM_URLENCODED) {
 			if err := r.ParseForm(); err != nil {
 				return err
 			}
-			return Bind(param, convertValues(r.Form))
+			return NewBinding().Bind(param, convertValues(r.Form))
 		}
 
 		if strings.Contains(hv, APPLICATION_JSON) {
