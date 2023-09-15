@@ -38,41 +38,40 @@ func (r *Request) GetJsonBody() string {
 	return string(bytes)
 }
 
-//func (r *Request) Demo() {
-//	log.Println(r.postJsonParams())
-//}
-
-func (r *Request) Params(param any) error {
+func (r *Request) Params(param any) (err error) {
 
 	if r.Method == http.MethodGet {
-		return NewBinding().Bind(param, convertValues(r.URL.Query()))
+		err = NewBinding().Bind(param, convertValues(r.URL.Query()))
 	}
 	if r.Method == http.MethodPost {
 		hv := r.Header.Get("Content-Type")
 		if strings.Contains(hv, MULTIPART_FORM_DATA) {
-			if err := r.ParseMultipartForm(defaultMaxMemory); err != nil {
-				return err
+			if err = r.ParseMultipartForm(defaultMaxMemory); err != nil {
+				return
 			}
-			return NewBinding().Bind(param, convertValues(r.MultipartForm.Value))
+			err = NewBinding().Bind(param, convertValues(r.MultipartForm.Value))
 		}
 
 		if strings.Contains(hv, X_WWW_FORM_URLENCODED) {
-			if err := r.ParseForm(); err != nil {
-				return err
+			if err = r.ParseForm(); err != nil {
+				return
 			}
-			return NewBinding().Bind(param, convertValues(r.Form))
+			err = NewBinding().Bind(param, convertValues(r.Form))
 		}
 
 		if strings.Contains(hv, APPLICATION_JSON) {
 			decoder := json.NewDecoder(r.Body)
-			if err := decoder.Decode(param); err != nil {
-				return err
+			if err = decoder.Decode(param); err != nil {
+				return
 			}
-			return nil
 		}
 	}
 
-	return nil
+	if err == nil {
+		err = NewValidate().validate(param)
+	}
+
+	return
 }
 
 func convertValues(values url.Values) map[string]string {

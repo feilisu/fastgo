@@ -212,11 +212,17 @@ func (v *Validator) validate(p any) error {
 		switch fieldValue.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 			i := _int64(fieldValue.Int())
-			err = i.validate(rv.tag.Get("validate"), rv.name, fieldValue.Int(), "")
+			err = i.validate(rv.tag.Get("validate"), rv.name, "")
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		case reflect.String:
+			i := _uint64(fieldValue.Int())
+			err = i.validate(rv.tag.Get("validate"), rv.name, "")
 		case reflect.Float32, reflect.Float64:
+			i := _float64(fieldValue.Int())
+			err = i.validate(rv.tag.Get("validate"), rv.name, "")
 		case reflect.Bool:
+		case reflect.String:
+			i := _string(fieldValue.String())
+			err = i.validate(rv.tag.Get("validate"), rv.name, "")
 		case reflect.Map:
 		case reflect.Slice:
 		case reflect.Struct:
@@ -232,6 +238,7 @@ func (v *Validator) validate(p any) error {
 type _int64 int64
 type _uint64 uint64
 type _float64 float64
+type _string string
 
 func parserTag(tag string) [][]string {
 	if len(tag) <= 0 {
@@ -247,11 +254,10 @@ func parserTag(tag string) [][]string {
 	return strss
 }
 
-type handler func()
-
-func (i *_int64) validate(tag string, fieldName string, fieldValue int64, msg string) error {
+func (i *_int64) validate(tag string, fieldName string, msg string) error {
 
 	strss := parserTag(tag)
+	fieldValue := int64(*i)
 
 	for i := 0; i < len(strss); i++ {
 		var rn string
@@ -280,6 +286,154 @@ func (i *_int64) validate(tag string, fieldName string, fieldValue int64, msg st
 		case "lte":
 			if fieldValue > rv {
 				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
+			}
+
+		}
+
+		if errorMsg != nil {
+
+			if len(msg) > 0 {
+				errorMsg.SetMsg(msg)
+			}
+			return errorMsg
+		}
+
+	}
+
+	return nil
+}
+
+func (i *_uint64) validate(tag string, fieldName string, msg string) error {
+
+	strss := parserTag(tag)
+	fieldValue := uint64(*i)
+
+	for i := 0; i < len(strss); i++ {
+		var rn string
+		var rv uint64
+		r := strss[i]
+		rn = r[0]
+		if len(r) > 1 {
+			rv, _ = strconv.ParseUint(r[1], 10, 64)
+		}
+
+		var errorMsg *Error
+
+		switch rn {
+		case "gt":
+			if fieldValue <= rv {
+				errorMsg = NewError(fieldName + "应该大于" + r[1])
+			}
+		case "gte":
+			if fieldValue < rv {
+				errorMsg = NewError(fieldName + "应该大于等于" + r[1])
+			}
+		case "lt":
+			if fieldValue >= rv {
+				errorMsg = NewError(fieldName + "应该小于" + r[1])
+			}
+		case "lte":
+			if fieldValue > rv {
+				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
+			}
+
+		}
+
+		if errorMsg != nil {
+
+			if len(msg) > 0 {
+				errorMsg.SetMsg(msg)
+			}
+			return errorMsg
+		}
+
+	}
+
+	return nil
+}
+
+func (i *_float64) validate(tag string, fieldName string, msg string) error {
+
+	strss := parserTag(tag)
+	fieldValue := float64(*i)
+
+	for i := 0; i < len(strss); i++ {
+		var rn string
+		var rv float64
+		r := strss[i]
+		rn = r[0]
+		if len(r) > 1 {
+			rv, _ = strconv.ParseFloat(r[1], 64)
+		}
+
+		var errorMsg *Error
+
+		switch rn {
+		case "gt":
+			if fieldValue <= rv {
+				errorMsg = NewError(fieldName + "应该大于" + r[1])
+			}
+		case "gte":
+			if fieldValue < rv {
+				errorMsg = NewError(fieldName + "应该大于等于" + r[1])
+			}
+		case "lt":
+			if fieldValue >= rv {
+				errorMsg = NewError(fieldName + "应该小于" + r[1])
+			}
+		case "lte":
+			if fieldValue > rv {
+				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
+			}
+
+		}
+
+		if errorMsg != nil {
+
+			if len(msg) > 0 {
+				errorMsg.SetMsg(msg)
+			}
+			return errorMsg
+		}
+
+	}
+
+	return nil
+}
+
+func (i *_string) validate(tag string, fieldName string, msg string) error {
+
+	strss := parserTag(tag)
+	fieldValue := string(*i)
+	length := int64(len(fieldValue))
+
+	for i := 0; i < len(strss); i++ {
+		var rn string
+		var rv int64
+		r := strss[i]
+		rn = r[0]
+		if len(r) > 1 {
+			rv, _ = strconv.ParseInt(r[1], 10, 64)
+		}
+
+		var errorMsg *Error
+
+		switch rn {
+		case "gt":
+			if length <= rv {
+				errorMsg = NewError(fieldName + "长度应该大于" + r[1])
+			}
+		case "gte":
+			if length < rv {
+				errorMsg = NewError(fieldName + "长度应该大于等于" + r[1])
+			}
+		case "lt":
+			if length >= rv {
+				errorMsg = NewError(fieldName + "长度应该小于" + r[1])
+			}
+		case "lte":
+			if length > rv {
+				errorMsg = NewError(fieldName + "长度应该小于等于" + r[1])
 			}
 
 		}
