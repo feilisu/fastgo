@@ -2,24 +2,55 @@ package fastgo
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"io"
+	"mime/multipart"
 	"net/http"
-	"net/url"
 	"strings"
+	"sync"
 )
 
 type Request struct {
 	*http.Request
+
+	requestParams *requestParams
+}
+
+func buildRequest(r *http.Request) (*Request, error) {
+	request := &Request{Request: r, requestParams: &requestParams{}}
+	err := parseParams(request)
+	if err != nil {
+		return nil, err
+	}
+	return request, nil
+}
+
+type requestParams struct {
+	bindType string
+	body     io.ReadCloser
+
+	// postParams + getParams; postParams优先级高于getParams, 如：postParams 和 getParams 同有id参数，id的值取postParams
+	params map[string]string
+
+	//URL 参数
+	getParams map[string]string
+
+	//multipart/form-data  application/x-www-form-urlencoded 参数
+	postParams map[string]string
+
+	state int
+	mux   sync.RWMutex
+	files map[string][]*multipart.FileHeader
 }
 
 const (
-	APPLICATION_JSON      = "application/json"
-	TEXT_HTML             = "text/html"
-	APPLICATION_XML       = "application/xml"
-	TEXT_XML              = "text/xml"
-	TEXT_PLAIN            = "text/plain"
-	X_WWW_FORM_URLENCODED = "application/x-www-form-urlencoded"
-	MULTIPART_FORM_DATA   = "multipart/form-data"
+	HEADER_APPLICATION_JSON      = "application/json"
+	HEADER_TEXT_HTML             = "text/html"
+	HEADER_APPLICATION_XML       = "application/xml"
+	HEADER_TEXT_XML              = "text/xml"
+	HEADER_TEXT_PLAIN            = "text/plain"
+	HEADER_X_WWW_FORM_URLENCODED = "application/x-www-form-urlencoded"
+	HEADER_MULTIPART_FORM_DATA   = "multipart/form-data"
 )
 
 const defaultMaxMemory int64 = 30 << 20
@@ -38,46 +69,97 @@ func (r *Request) GetJsonBody() string {
 	return string(bytes)
 }
 
-func (r *Request) Params(param any) (err error) {
-
-	if r.Method == http.MethodGet {
-		err = NewBinding().Bind(param, convertValues(r.URL.Query()))
-	}
-	if r.Method == http.MethodPost {
-		hv := r.Header.Get("Content-Type")
-		if strings.Contains(hv, MULTIPART_FORM_DATA) {
-			if err = r.ParseMultipartForm(defaultMaxMemory); err != nil {
-				return
-			}
-			err = NewBinding().Bind(param, convertValues(r.MultipartForm.Value))
-		}
-
-		if strings.Contains(hv, X_WWW_FORM_URLENCODED) {
-			if err = r.ParseForm(); err != nil {
-				return
-			}
-			err = NewBinding().Bind(param, convertValues(r.Form))
-		}
-
-		if strings.Contains(hv, APPLICATION_JSON) {
-			decoder := json.NewDecoder(r.Body)
-			if err = decoder.Decode(param); err != nil {
-				return
-			}
-		}
-	}
-
-	if err == nil {
-		err = NewValidate().validate(param)
-	}
-
+func (r *Request) GetParams(param any) (err error) {
+	err = NewBinding().Bind(param, r.requestParams.getParams)
 	return
 }
 
-func convertValues(values url.Values) map[string]string {
-	m := make(map[string]string, len(values))
-	for k, v := range values {
-		m[k] = v[0]
+func (r *Request) PostParams(param any) (err error) {
+	err = NewBinding().Bind(param, r.requestParams.postParams)
+	return
+}
+
+func (r *Request) XmlParams(param any) (err error) {
+	decoder := xml.NewDecoder(r.Body)
+	err = decoder.Decode(param)
+	return
+}
+
+func (r *Request) JsonParams(param any) (err error) {
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(param)
+	return
+}
+
+func (r *Request) Params(param any) (err error) {
+	err = NewBinding().Bind(param, r.requestParams.params)
+	if err != nil {
+		return err
 	}
-	return m
+
+	hv := r.Header.Get("Content-Type")
+	if strings.Contains(hv, HEADER_APPLICATION_JSON) {
+		decoder := json.NewDecoder(r.Body)
+		err = decoder.Decode(param)
+	} else if strings.Contains(hv, HEADER_APPLICATION_XML) {
+		decoder := xml.NewDecoder(r.Body)
+		err = decoder.Decode(param)
+	}
+	return
+}
+
+// parseParams
+func parseParams(r *Request) error {
+	r.requestParams.mux.Lock()
+
+	if r.requestParams.state == 1 {
+		return nil
+	}
+
+	hv := r.Header.Get("Content-Type")
+	if strings.Contains(hv, HEADER_MULTIPART_FORM_DATA) {
+		if err := r.ParseMultipartForm(defaultMaxMemory); err != nil {
+			return err
+		}
+		r.requestParams.postParams = vsTov(r.MultipartForm.Value)
+		if r.MultipartForm != nil && r.MultipartForm.File != nil {
+			r.requestParams.files = r.MultipartForm.File
+		}
+	} else if strings.Contains(hv, HEADER_X_WWW_FORM_URLENCODED) {
+		if err := r.ParseForm(); err != nil {
+			return err
+		}
+		r.requestParams.postParams = vsTov(r.PostForm)
+	} else if strings.Contains(hv, HEADER_APPLICATION_JSON) {
+		r.requestParams.body = r.Body
+	} else if strings.Contains(hv, HEADER_APPLICATION_XML) {
+		r.requestParams.body = r.Body
+	}
+
+	r.requestParams.getParams = vsTov(r.URL.Query())
+
+	//合并参数
+	r.requestParams.params = r.requestParams.postParams
+	if r.requestParams.params == nil {
+		r.requestParams.params = make(map[string]string)
+	}
+
+	for k, v := range r.requestParams.getParams {
+		_, ok := r.requestParams.params[k]
+		if !ok {
+			r.requestParams.params[k] = v
+		}
+	}
+
+	r.requestParams.state = 1
+	r.requestParams.mux.Unlock()
+	return nil
+}
+
+func vsTov(vs map[string][]string) map[string]string {
+	res := make(map[string]string)
+	for k, v := range vs {
+		res[k] = v[0]
+	}
+	return res
 }

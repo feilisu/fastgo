@@ -2,21 +2,25 @@ package fastgo
 
 import (
 	"context"
+	"net"
 )
 
 type Context struct {
 	context.Context
-	Middlewares []Middleware
-	Request     *Request
-	Response    *Response
+	Request  *Request
+	Response *Response
 }
 
-func (c *Context) ExecMiddleware() error {
-	for _, m := range c.Middlewares {
-		err := m.Exec(c)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+var (
+	FContext = new(Context)
+)
+
+// ServerBaseContext 服务端基础context
+func ServerBaseContext(listener net.Listener) context.Context {
+	return FContext
+}
+
+// ServerConnContext 当前链接context
+func ServerConnContext(ctx context.Context, c net.Conn) context.Context {
+	return ctx
 }

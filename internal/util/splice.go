@@ -1,4 +1,4 @@
-package base_type
+package util
 
 func SpliceContains(splice []any, sub any) bool {
 	for _, v := range splice {

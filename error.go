@@ -8,7 +8,6 @@ type Error struct {
 func NewError(str string) *Error {
 	return &Error{msg: str}
 }
-
 func (e *Error) SetMsg(msg string) {
 	e.msg = msg
 }

@@ -1,4 +1,4 @@
-package base_type
+package util
 
 import "strings"
 

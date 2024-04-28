@@ -1,10 +1,11 @@
 package fastgo
 
 import (
-	"fastgo/base_type"
+	"encoding/json"
+	"fastgo/internal/util"
+	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -22,38 +23,39 @@ type reflectValue struct {
 }
 
 type reflectField struct {
-	name     string
-	kind     reflect.Kind
-	defValue string
-	tag      reflect.StructTag
+	name string
+	kind reflect.Kind
+	tag  reflect.StructTag
 }
 
 func (c *reflectCache) get(t reflect.Type) (rv *reflectValue, err error) {
 
-	c.mux.RLock()
+	c.mux.Lock()
 	rv, ok := c.cache[t]
 	if !ok {
 		rv, err = c.set(t)
 	}
-	c.mux.RUnlock()
+	c.mux.Unlock()
 	return
 }
 
 func (c *reflectCache) set(t reflect.Type) (rv *reflectValue, err error) {
+
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
 	if t.Kind() != reflect.Struct {
 		return nil, NewError("类型必须是struct")
 	}
 
-	elem := t.Elem()
 	rv = new(reflectValue)
 
-	for i := 0; i < elem.NumField(); i++ {
-		field := elem.Field(i)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
 		rf := &reflectField{
-			name:     field.Name,
-			kind:     field.Type.Kind(),
-			tag:      field.Tag,
-			defValue: field.Tag.Get("default"),
+			name: field.Name,
+			kind: field.Type.Kind(),
+			tag:  field.Tag,
 		}
 		rv.fields = append(rv.fields, rf)
 	}
@@ -75,31 +77,29 @@ func NewBinding() *Binding {
 
 func (bi *Binding) Bind(p any, values map[string]string) error {
 	var paramValue reflect.Value
+	var paramType reflect.Type
 
 	paramValue = reflect.ValueOf(p)
 	if paramValue.Kind() == reflect.Pointer {
 		paramValue = paramValue.Elem()
 	}
+	paramType = paramValue.Type()
 
-	rc, err := rCache.get(reflect.TypeOf(p))
+	rc, err := rCache.get(paramType)
 	if err != nil {
 		return err
 	}
 
 	for _, rv := range rc.fields {
 
-		field, b := paramValue.Type().FieldByName(rv.name)
+		field, b := paramType.FieldByName(rv.name)
 		if !b {
 			continue
 		}
 
-		vs, ok := values[base_type.FirstToLow(field.Name)]
+		vs, ok := values[util.FirstToLow(field.Name)]
 		if !ok {
-			//是否设置了默认值
-			if rv.defValue == "" {
-				continue
-			}
-			vs = rv.defValue
+			continue
 		}
 
 		fieldValue := paramValue.FieldByName(field.Name)
@@ -110,20 +110,25 @@ func (bi *Binding) Bind(p any, values map[string]string) error {
 		switch field.Type.Kind() {
 		case reflect.Struct:
 			if fieldValue.CanAddr() {
-				err := bi.Bind(fieldValue.Addr().Interface(), values)
+				err := json.Unmarshal([]byte(vs), fieldValue.Addr().Interface())
 				if err != nil {
 					return err
 				}
 			}
-		//case reflect.Map:
-		//case reflect.Slice:
-		//	fieldValue.Type()
-		//	if fieldValue.CanAddr() {
-		//		err := json.Unmarshal([]byte(vs), fieldValue.Pointer())
-		//		if err != nil {
-		//			return err
-		//		}
-		//	}
+		case reflect.Map:
+			if fieldValue.CanAddr() {
+				err := json.Unmarshal([]byte(vs), fieldValue.Addr().Interface())
+				if err != nil {
+					return err
+				}
+			}
+		case reflect.Slice:
+			if fieldValue.CanAddr() {
+				err := json.Unmarshal([]byte(vs), fieldValue.Addr().Interface())
+				if err != nil {
+					return err
+				}
+			}
 		case reflect.Bool:
 			parseBool, _ := strconv.ParseBool(vs)
 			fieldValue.SetBool(parseBool)
@@ -153,6 +158,169 @@ func (bi *Binding) Bind(p any, values map[string]string) error {
 			_ = stringToFloat(vs, 64, fieldValue)
 		case reflect.Float32:
 			_ = stringToFloat(vs, 32, fieldValue)
+		}
+	}
+
+	if valid, ok := p.(Validator); ok {
+		err := valid.Validate()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (bi *Binding) BindRequestParams(p any, values map[string]any) error {
+	if values == nil {
+		return NewError("bind values is nil ")
+	}
+
+	var paramValue reflect.Value
+	var paramType reflect.Type
+
+	paramValue = reflect.ValueOf(p)
+	if paramValue.Kind() == reflect.Pointer {
+		paramValue = paramValue.Elem()
+	}
+	paramType = paramValue.Type()
+
+	rc, err := rCache.get(paramType)
+	if err != nil {
+		return err
+	}
+
+	for _, rv := range rc.fields {
+
+		field, b := paramType.FieldByName(rv.name)
+		if !b {
+			continue
+		}
+
+		vs, ok := values[util.FirstToLow(field.Name)]
+		if !ok {
+			continue
+		}
+
+		fieldValue := paramValue.FieldByName(field.Name)
+		if !fieldValue.CanSet() {
+			continue
+		}
+
+		switch field.Type.Kind() {
+		//case reflect.Struct:
+		//	if fieldValue.CanAddr() {
+		//		vsm := anyToMap(vs)
+		//		if vsm != nil {
+		//			err := bi.BindRequestParams(fieldValue.Addr().Interface(), vsm)
+		//			if err != nil {
+		//				return err
+		//			}
+		//		}
+		//	}
+		//case reflect.Map:
+		//	if fieldValue.CanAddr() {
+		//		vsm := anyToMap(vs)
+		//		if vsm != nil {
+		//			err := bi.BindRequestParams(fieldValue.Addr().Interface(), vsm)
+		//			if err != nil {
+		//				return err
+		//			}
+		//		}
+		//	}
+		////case reflect.Slice:
+		////	fieldValue.Type()
+		////	if fieldValue.CanAddr() {
+		////		err := json.Unmarshal([]byte(vs), fieldValue.Pointer())
+		////		if err != nil {
+		////			return err
+		////		}
+		////	}
+		////	fieldValue.set
+		case reflect.Bool:
+			b, err := anyToBool(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetBool(b)
+		case reflect.String:
+			s, err := anyToString(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetString(s)
+		case reflect.Int64:
+			i, err := anyToInt(vs, 64)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetInt(i)
+		case reflect.Int32:
+			i, err := anyToInt(vs, 32)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetInt(i)
+		case reflect.Int16:
+			i, err := anyToInt(vs, 16)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetInt(i)
+		case reflect.Int8:
+			i, err := anyToInt(vs, 8)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetInt(i)
+		case reflect.Int:
+			i, err := anyToInt(vs, 0)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetInt(i)
+		case reflect.Uint64:
+			i, err := anyToUint(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetUint(i)
+		case reflect.Uint32:
+			i, err := anyToUint(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetUint(i)
+		case reflect.Uint16:
+			i, err := anyToUint(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetUint(i)
+		case reflect.Uint8:
+			i, err := anyToUint(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetUint(i)
+		case reflect.Uint:
+			i, err := anyToUint(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetUint(i)
+		case reflect.Float64:
+			f, err := anyToFloat(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetFloat(f)
+		case reflect.Float32:
+			f, err := anyToFloat(vs)
+			if err != nil {
+				return err
+			}
+			fieldValue.SetFloat(f)
 		}
 	}
 	return nil
@@ -185,268 +353,131 @@ func stringToFloat(str string, bitSize int, value reflect.Value) error {
 	return nil
 }
 
-type Validator struct {
+func anyToMap(a any) map[string]any {
+	m, ok := a.(map[string]any)
+	if ok {
+		return m
+	}
+	return nil
 }
 
-func NewValidate() *Validator {
-	return new(Validator)
-}
-
-func (v *Validator) validate(p any) error {
-
-	rc, err := rCache.get(reflect.TypeOf(p))
-	if err != nil {
-		return err
-	}
-
-	var paramValue reflect.Value
-
-	paramValue = reflect.ValueOf(p)
-	if paramValue.Kind() == reflect.Pointer {
-		paramValue = paramValue.Elem()
-	}
-
-	for _, rv := range rc.fields {
-
-		fieldValue := paramValue.FieldByName(rv.name)
-		switch fieldValue.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			i := _int64(fieldValue.Int())
-			err = i.validate(rv.tag.Get("validate"), rv.name, "")
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			i := _uint64(fieldValue.Int())
-			err = i.validate(rv.tag.Get("validate"), rv.name, "")
-		case reflect.Float32, reflect.Float64:
-			i := _float64(fieldValue.Int())
-			err = i.validate(rv.tag.Get("validate"), rv.name, "")
-		case reflect.Bool:
-		case reflect.String:
-			i := _string(fieldValue.String())
-			err = i.validate(rv.tag.Get("validate"), rv.name, "")
-		case reflect.Map:
-		case reflect.Slice:
-		case reflect.Struct:
-		}
-
+func anyToInt(a any, bitSize int) (int64, error) {
+	k := reflect.TypeOf(a).Kind()
+	switch k {
+	case reflect.String:
+		s := a.(string)
+		i, err := strconv.ParseInt(s, 10, bitSize)
 		if err != nil {
-			return nil
+			return 0, err
 		}
+		return i, err
+	case reflect.Int64:
+		u := a.(int64)
+		return u, nil
+	case reflect.Int32:
+		if bitSize < 32 {
+			return 0, NewError(fmt.Sprintf("%T can not conversion type to int%d", a, bitSize))
+		}
+		u := a.(int32)
+		return int64(u), nil
+	case reflect.Int16:
+		if bitSize < 16 {
+			return 0, NewError(fmt.Sprintf("%T can not conversion type to int%d", a, bitSize))
+		}
+		u := a.(int16)
+		return int64(u), nil
+	case reflect.Int8:
+		if bitSize < 8 {
+			return 0, NewError(fmt.Sprintf("%T can not conversion type to int%d", a, bitSize))
+		}
+		u := a.(int8)
+		return int64(u), nil
+	case reflect.Int:
+		sysSize := strconv.IntSize
+		if bitSize < sysSize {
+			return 0, NewError(fmt.Sprintf("%d system %T can not conversion type to int%d", sysSize, a, bitSize))
+		}
+		u := a.(uint)
+		return int64(u), nil
+	default:
+		return 0, NewError(fmt.Sprintf("%T can not conversion type to int", a))
 	}
-	return nil
 }
 
-type _int64 int64
-type _uint64 uint64
-type _float64 float64
-type _string string
-
-func parserTag(tag string) [][]string {
-	if len(tag) <= 0 {
-		return nil
+func anyToFloat(a any) (res float64, err error) {
+	k := reflect.TypeOf(a).Kind()
+	switch k {
+	case reflect.String:
+		var f float64
+		s := a.(string)
+		f, err = strconv.ParseFloat(s, 64)
+		if err != nil {
+			return
+		}
+		res = f
+		return
+	default:
+		if reflect.TypeOf(res).Kind() == k {
+			res = a.(float64)
+			return
+		}
+		err = NewError(fmt.Sprintf("%T can not conversion type to float", a))
+		return
 	}
-
-	var strss [][]string
-	tags := strings.Split(tag, ",")
-	for _, s := range tags {
-		ss := strings.Split(s, "=")
-		strss = append(strss, ss)
-	}
-	return strss
 }
 
-func (i *_int64) validate(tag string, fieldName string, msg string) error {
+func anyToUint(a any) (res uint64, err error) {
 
-	strss := parserTag(tag)
-	fieldValue := int64(*i)
-
-	for i := 0; i < len(strss); i++ {
-		var rn string
-		var rv int64
-		r := strss[i]
-		rn = r[0]
-		if len(r) > 1 {
-			rv, _ = strconv.ParseInt(r[1], 10, 64)
+	k := reflect.TypeOf(a).Kind()
+	switch k {
+	case reflect.String:
+		var i uint64
+		s := a.(string)
+		i, err = strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return
 		}
-
-		var errorMsg *Error
-
-		switch rn {
-		case "gt":
-			if fieldValue <= rv {
-				errorMsg = NewError(fieldName + "应该大于" + r[1])
-			}
-		case "gte":
-			if fieldValue < rv {
-				errorMsg = NewError(fieldName + "应该大于等于" + r[1])
-			}
-		case "lt":
-			if fieldValue >= rv {
-				errorMsg = NewError(fieldName + "应该小于" + r[1])
-			}
-		case "lte":
-			if fieldValue > rv {
-				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
-			}
-
+		res = i
+		return
+	default:
+		if reflect.TypeOf(res).Kind() == k {
+			res = a.(uint64)
+			return
 		}
-
-		if errorMsg != nil {
-
-			if len(msg) > 0 {
-				errorMsg.SetMsg(msg)
-			}
-			return errorMsg
-		}
-
+		err = NewError(fmt.Sprintf("%T can not conversion type to uint", a))
+		return
 	}
-
-	return nil
 }
 
-func (i *_uint64) validate(tag string, fieldName string, msg string) error {
-
-	strss := parserTag(tag)
-	fieldValue := uint64(*i)
-
-	for i := 0; i < len(strss); i++ {
-		var rn string
-		var rv uint64
-		r := strss[i]
-		rn = r[0]
-		if len(r) > 1 {
-			rv, _ = strconv.ParseUint(r[1], 10, 64)
-		}
-
-		var errorMsg *Error
-
-		switch rn {
-		case "gt":
-			if fieldValue <= rv {
-				errorMsg = NewError(fieldName + "应该大于" + r[1])
-			}
-		case "gte":
-			if fieldValue < rv {
-				errorMsg = NewError(fieldName + "应该大于等于" + r[1])
-			}
-		case "lt":
-			if fieldValue >= rv {
-				errorMsg = NewError(fieldName + "应该小于" + r[1])
-			}
-		case "lte":
-			if fieldValue > rv {
-				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
-			}
-
-		}
-
-		if errorMsg != nil {
-
-			if len(msg) > 0 {
-				errorMsg.SetMsg(msg)
-			}
-			return errorMsg
-		}
-
+func anyToString(a any) (string, error) {
+	k := reflect.TypeOf(a).Kind()
+	switch k {
+	case reflect.String:
+		s := a.(string)
+		return s, nil
+	default:
+		return "", NewError(fmt.Sprintf("%T can not conversion type to string", a))
 	}
-
-	return nil
 }
 
-func (i *_float64) validate(tag string, fieldName string, msg string) error {
-
-	strss := parserTag(tag)
-	fieldValue := float64(*i)
-
-	for i := 0; i < len(strss); i++ {
-		var rn string
-		var rv float64
-		r := strss[i]
-		rn = r[0]
-		if len(r) > 1 {
-			rv, _ = strconv.ParseFloat(r[1], 64)
+func anyToBool(a any) (bool, error) {
+	k := reflect.TypeOf(a).Kind()
+	if k == reflect.String {
+		s := a.(string)
+		b, err := strconv.ParseBool(s)
+		if err != nil {
+			return b, nil
 		}
-
-		var errorMsg *Error
-
-		switch rn {
-		case "gt":
-			if fieldValue <= rv {
-				errorMsg = NewError(fieldName + "应该大于" + r[1])
-			}
-		case "gte":
-			if fieldValue < rv {
-				errorMsg = NewError(fieldName + "应该大于等于" + r[1])
-			}
-		case "lt":
-			if fieldValue >= rv {
-				errorMsg = NewError(fieldName + "应该小于" + r[1])
-			}
-		case "lte":
-			if fieldValue > rv {
-				errorMsg = NewError(fieldName + "应该小于等于" + r[1])
-			}
-
-		}
-
-		if errorMsg != nil {
-
-			if len(msg) > 0 {
-				errorMsg.SetMsg(msg)
-			}
-			return errorMsg
-		}
-
+		return b, nil
+	} else if k == reflect.Bool {
+		b := a.(bool)
+		return b, nil
+	} else {
+		return false, NewError(fmt.Sprintf("%T can not conversion type to bool", a))
 	}
-
-	return nil
 }
 
-func (i *_string) validate(tag string, fieldName string, msg string) error {
-
-	strss := parserTag(tag)
-	fieldValue := string(*i)
-	length := int64(len(fieldValue))
-
-	for i := 0; i < len(strss); i++ {
-		var rn string
-		var rv int64
-		r := strss[i]
-		rn = r[0]
-		if len(r) > 1 {
-			rv, _ = strconv.ParseInt(r[1], 10, 64)
-		}
-
-		var errorMsg *Error
-
-		switch rn {
-		case "gt":
-			if length <= rv {
-				errorMsg = NewError(fieldName + "长度应该大于" + r[1])
-			}
-		case "gte":
-			if length < rv {
-				errorMsg = NewError(fieldName + "长度应该大于等于" + r[1])
-			}
-		case "lt":
-			if length >= rv {
-				errorMsg = NewError(fieldName + "长度应该小于" + r[1])
-			}
-		case "lte":
-			if length > rv {
-				errorMsg = NewError(fieldName + "长度应该小于等于" + r[1])
-			}
-
-		}
-
-		if errorMsg != nil {
-
-			if len(msg) > 0 {
-				errorMsg.SetMsg(msg)
-			}
-			return errorMsg
-		}
-
-	}
-
-	return nil
+// Validator 验证器
+type Validator interface {
+	Validate() error
 }

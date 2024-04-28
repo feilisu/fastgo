@@ -1,37 +1,146 @@
 package fastgo
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"time"
 )
 
 type Server struct {
-	addr         string
-	port         string
-	readTimeout  time.Duration
-	writeTimeout time.Duration
-	errorLog     *log.Logger
+	Name         string        `json:"name"`
+	Addr         string        `json:"addr"`
+	Port         string        `json:"port"`
+	ReadTimeout  time.Duration `json:"readTimeout"`
+	WriteTimeout time.Duration `json:"writeTimeout"`
+	ErrorLog     *log.Logger
 	server       *http.Server
+	Middlewares  []Middleware
+	Router       Router
 }
 
-func NewServer() *Server {
+func DefaultServer() *Server {
 	return &Server{
-		addr:         "0.0.0.0",
-		port:         "80",
-		readTimeout:  5 * time.Second,
-		writeTimeout: 5 * time.Second,
-		errorLog:     GetLogger(),
+		Name:         "default",
+		Addr:         "0.0.0.0",
+		Port:         "8090",
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		ErrorLog:     serverErrorLogger(),
 	}
 }
 
-func (s *Server) Run(r *http.ServeMux) error {
-	s.server = &http.Server{
-		Addr:         s.addr + ":" + s.port,
-		Handler:      r,
-		ReadTimeout:  s.readTimeout,
-		WriteTimeout: s.writeTimeout,
-		ErrorLog:     s.errorLog,
+func (s *Server) Run(r *Router) error {
+
+	elog := s.ErrorLog
+	if elog == nil {
+		elog = serverErrorLogger()
 	}
+
+	s.server = &http.Server{
+		Addr:         s.Addr + ":" + s.Port,
+		ReadTimeout:  s.ReadTimeout,
+		WriteTimeout: s.WriteTimeout,
+		ErrorLog:     elog,
+		//BaseContext:  ServerBaseContext,
+		ConnContext: ServerConnContext,
+	}
+	s.registerHandle(r)
 	return s.server.ListenAndServe()
+}
+
+// registerHandle
+func (s *Server) registerHandle(r *Router) {
+
+	serveMux := http.NewServeMux()
+	s.initDebugRouter(serveMux)
+
+	if r.entryMap != nil {
+		for host, entryList := range r.entryMap {
+			for _, entry := range entryList {
+				log.Printf("%s %s %s", entry.methods, host, entry.path)
+
+				var url string
+				if entry.host == DefaultHost {
+					url = entry.path
+				} else {
+					url = host + entry.path
+				}
+
+				serveMux.Handle(url, s.getHandler(entry))
+			}
+		}
+	}
+
+	s.server.Handler = serveMux
+}
+
+// initDebugRouter
+func (s *Server) initDebugRouter(serveMux *http.ServeMux) {
+	serveMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+	serveMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+	serveMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+	serveMux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+}
+
+// middlewareHandler 中间件处理
+func (s *Server) middlewareHandle(ctx *Context, ms []Middleware) error {
+	for _, middleware := range ms {
+		err := middleware.Exec(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// getHandler 路由处理器
+func (s *Server) getHandler(entry Entry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		defer LoggerSync()
+		defer func() {
+			err := recover()
+			if err != nil {
+
+				res := make(map[string]string)
+				res["httpCode"] = "500"
+				res["message"] = fmt.Sprintf("%v", err)
+				marshal, _ := json.Marshal(res)
+				w.WriteHeader(HttpStatus500)
+				w.Header().Set("Content-Type", "application/json;charset=utf8")
+				_, _ = w.Write(marshal)
+
+			}
+		}()
+
+		ctx := context.WithValue(r.Context(), 1, 1)
+		response := buildResponse(w)
+		request, err := buildRequest(r)
+		if err != nil {
+			_ = response.Error(err)
+			return
+		}
+		sctx := &Context{
+			Context:  ctx,
+			Request:  request,
+			Response: response,
+		}
+
+		err = s.middlewareHandle(sctx, s.Middlewares)
+		if err != nil {
+			_ = sctx.Response.Json(err)
+			return
+		}
+
+		err = entry.handle.Handle(sctx)
+		if err != nil {
+			_ = sctx.Response.Json(err)
+			return
+		}
+		return
+	}
 }
