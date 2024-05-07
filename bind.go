@@ -2,8 +2,8 @@ package fastgo
 
 import (
 	"encoding/json"
-	"fastgo/internal/util"
 	"fmt"
+	"github.com/feilisu/fastgo/internal/util"
 	"reflect"
 	"strconv"
 	"sync"
