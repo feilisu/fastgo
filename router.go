@@ -1,7 +1,6 @@
 package fastgo
 
 import (
-	"net/http"
 	"strings"
 )
 
@@ -26,7 +25,6 @@ func (hf HandlerFunc) Handle(ctx *Context) error {
 }
 
 type Router struct {
-	serveMux *http.ServeMux
 	entry    Entry
 	entryMap map[string][]Entry
 }

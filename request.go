@@ -3,6 +3,8 @@ package fastgo
 import (
 	"encoding/json"
 	"encoding/xml"
+	"github.com/gorilla/mux"
+	"github.com/mitchellh/mapstructure"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -26,14 +28,16 @@ func buildRequest(r *http.Request) (*Request, error) {
 }
 
 type requestParams struct {
-	bindType string
-	body     io.ReadCloser
+	body io.ReadCloser
 
 	// postParams + getParams; postParams优先级高于getParams, 如：postParams 和 getParams 同有id参数，id的值取postParams
 	params map[string]string
 
 	//URL 参数
 	getParams map[string]string
+
+	//PATH 参数
+	pathParams map[string]string
 
 	//multipart/form-data  application/x-www-form-urlencoded 参数
 	postParams map[string]string
@@ -57,7 +61,17 @@ const defaultMaxMemory int64 = 30 << 20
 
 // getString
 func (r *Request) getString(key string) string {
-	return key
+	if res, ok := r.requestParams.params[key]; ok {
+		return res
+	}
+
+	return ""
+
+}
+
+// GetParams
+func (r *Request) GetParams() map[string]string {
+	return r.requestParams.params
 }
 
 func (r *Request) GetJsonBody() string {
@@ -69,14 +83,18 @@ func (r *Request) GetJsonBody() string {
 	return string(bytes)
 }
 
-func (r *Request) GetParams(param any) (err error) {
-	err = NewBinding().Bind(param, r.requestParams.getParams)
-	return
+func (r *Request) QueryParams(param any) (err error) {
+	return mapstructure.Decode(r.requestParams.getParams, param)
+}
+
+func (r *Request) PathParams(param any) (err error) {
+	return mapstructure.Decode(r.requestParams.pathParams, param)
+
 }
 
 func (r *Request) PostParams(param any) (err error) {
-	err = NewBinding().Bind(param, r.requestParams.postParams)
-	return
+	return mapstructure.Decode(r.requestParams.postParams, param)
+
 }
 
 func (r *Request) XmlParams(param any) (err error) {
@@ -92,7 +110,7 @@ func (r *Request) JsonParams(param any) (err error) {
 }
 
 func (r *Request) Params(param any) (err error) {
-	err = NewBinding().Bind(param, r.requestParams.params)
+	err = mapstructure.Decode(r.requestParams.params, param)
 	if err != nil {
 		return err
 	}
@@ -136,15 +154,22 @@ func parseParams(r *Request) error {
 		r.requestParams.body = r.Body
 	}
 
+	r.requestParams.pathParams = mux.Vars(r.Request)
 	r.requestParams.getParams = vsTov(r.URL.Query())
-
-	//合并参数
 	r.requestParams.params = r.requestParams.postParams
 	if r.requestParams.params == nil {
 		r.requestParams.params = make(map[string]string)
 	}
 
+	//合并参数
 	for k, v := range r.requestParams.getParams {
+		_, ok := r.requestParams.params[k]
+		if !ok {
+			r.requestParams.params[k] = v
+		}
+	}
+
+	for k, v := range r.requestParams.pathParams {
 		_, ok := r.requestParams.params[k]
 		if !ok {
 			r.requestParams.params[k] = v

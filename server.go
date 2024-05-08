@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/mux"
 	"log"
 	"net/http"
 	"net/http/pprof"
@@ -29,7 +30,6 @@ func DefaultServer() *Server {
 		Port:         "8090",
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
-		ErrorLog:     serverErrorLogger(),
 	}
 }
 
@@ -55,7 +55,8 @@ func (s *Server) Run(r *Router) error {
 // registerHandle
 func (s *Server) registerHandle(r *Router) {
 
-	serveMux := http.NewServeMux()
+	//serveMux := http.NewServeMux()
+	serveMux := mux.NewRouter()
 	s.initDebugRouter(serveMux)
 
 	if r.entryMap != nil {
@@ -63,14 +64,11 @@ func (s *Server) registerHandle(r *Router) {
 			for _, entry := range entryList {
 				log.Printf("%s %s %s", entry.methods, host, entry.path)
 
-				var url string
 				if entry.host == DefaultHost {
-					url = entry.path
+					serveMux.Host(entry.host).Path(entry.path).Methods(entry.methods...).HandlerFunc(s.getHandler(entry))
 				} else {
-					url = host + entry.path
+					serveMux.Path(entry.path).Methods(entry.methods...).HandlerFunc(s.getHandler(entry))
 				}
-
-				serveMux.Handle(url, s.getHandler(entry))
 			}
 		}
 	}
@@ -79,7 +77,7 @@ func (s *Server) registerHandle(r *Router) {
 }
 
 // initDebugRouter
-func (s *Server) initDebugRouter(serveMux *http.ServeMux) {
+func (s *Server) initDebugRouter(serveMux *mux.Router) {
 	serveMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
 	serveMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
 	serveMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
@@ -131,6 +129,12 @@ func (s *Server) getHandler(entry Entry) http.HandlerFunc {
 		}
 
 		err = s.middlewareHandle(sctx, s.Middlewares)
+		if err != nil {
+			_ = sctx.Response.Json(err)
+			return
+		}
+
+		err = s.middlewareHandle(sctx, entry.middlewares)
 		if err != nil {
 			_ = sctx.Response.Json(err)
 			return
