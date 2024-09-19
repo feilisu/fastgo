@@ -27,6 +27,8 @@ func (hf HandlerFunc) Handle(ctx *Context) error {
 type Router struct {
 	entry    Entry
 	entryMap map[string][]Entry
+
+	Middlewares []Middleware
 }
 
 type Entry struct {
@@ -39,6 +41,11 @@ type Entry struct {
 
 func NewRouter() *Router {
 	return new(Router)
+}
+
+func (f *Router) GlobalMiddleware(ms ...Middleware) *Router {
+	f.Middlewares = ms
+	return f
 }
 
 func (f *Router) Host(h string) *Router {

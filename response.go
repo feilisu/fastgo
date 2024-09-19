@@ -20,8 +20,8 @@ const (
 
 func (r *Response) Text(str string) error {
 	bs := []byte(str)
-	r.WriteHeader(HttpStatus200)
 	r.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	r.WriteHeader(HttpStatus200)
 	_, err := r.Write(bs)
 	if err != nil {
 		return err
@@ -34,8 +34,9 @@ func (r *Response) Json(res any) error {
 	if err != nil {
 		return err
 	}
-	r.WriteHeader(HttpStatus200)
+	r.Header().Set("Access-Control-Allow-Origin", "*")
 	r.Header().Set("Content-Type", "application/json;charset=utf8")
+	r.WriteHeader(HttpStatus200)
 	_, err = r.Write(marshal)
 	if err != nil {
 		return err
@@ -45,8 +46,8 @@ func (r *Response) Json(res any) error {
 
 func (r *Response) Error(str error) error {
 	bs := []byte(str.Error())
-	r.WriteHeader(HttpStatus500)
 	r.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	r.WriteHeader(HttpStatus500)
 	_, err := r.Write(bs)
 	if err != nil {
 		return err

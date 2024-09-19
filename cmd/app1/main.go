@@ -1,8 +1,9 @@
 package main
 
 import (
-	"fastgo"
+	"github.com/feilisu/fastgo"
 	"log"
+	"strconv"
 	"time"
 )
 
@@ -62,15 +63,27 @@ func main() {
 	}()
 
 	server := fastgo.DefaultServer()
-	server.Middlewares = []fastgo.Middleware{
-		fastgo.MiddlewareFunc(Mtest1),
-		new(Mtest2),
-	}
+	server.Port = strconv.Itoa(11220)
 
 	r := fastgo.NewRouter()
 	r.Host(fastgo.DefaultHost).Path("/info").GET(func(ctx *fastgo.Context) error {
 		err := ctx.Response.Text("你好")
 		log.Println(ctx.Value("RemoteAddr"))
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+		return nil
+	})
+
+	type TestResult struct {
+		Result string
+	}
+
+	r.Host(fastgo.DefaultHost).Path("/icbcnewmis").POST(func(ctx *fastgo.Context) error {
+		s := new(TestResult)
+		s.Result = "1"
+		err := ctx.Response.Json(s)
 		if err != nil {
 			log.Println(err)
 			return err

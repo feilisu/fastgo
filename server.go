@@ -19,7 +19,6 @@ type Server struct {
 	WriteTimeout time.Duration `json:"writeTimeout"`
 	ErrorLog     *log.Logger
 	server       *http.Server
-	Middlewares  []Middleware
 	Router       Router
 }
 
@@ -45,9 +44,9 @@ func (s *Server) Run(r *Router) error {
 		ReadTimeout:  s.ReadTimeout,
 		WriteTimeout: s.WriteTimeout,
 		ErrorLog:     elog,
-		//BaseContext:  ServerBaseContext,
-		ConnContext: ServerConnContext,
+		ConnContext:  ServerConnContext,
 	}
+	log.Printf("SERVER LISTEN ADDR: %s", s.server.Addr)
 	s.registerHandle(r)
 	return s.server.ListenAndServe()
 }
@@ -64,10 +63,10 @@ func (s *Server) registerHandle(r *Router) {
 			for _, entry := range entryList {
 				log.Printf("%s %s %s", entry.methods, host, entry.path)
 
-				if entry.host == DefaultHost {
-					serveMux.Host(entry.host).Path(entry.path).Methods(entry.methods...).HandlerFunc(s.getHandler(entry))
+				if entry.host != DefaultHost {
+					serveMux.Host(entry.host).Path(entry.path).Methods(entry.methods...).HandlerFunc(s.getHandler(entry, r))
 				} else {
-					serveMux.Path(entry.path).Methods(entry.methods...).HandlerFunc(s.getHandler(entry))
+					serveMux.Path(entry.path).Methods(entry.methods...).HandlerFunc(s.getHandler(entry, r))
 				}
 			}
 		}
@@ -96,7 +95,7 @@ func (s *Server) middlewareHandle(ctx *Context, ms []Middleware) error {
 }
 
 // getHandler 路由处理器
-func (s *Server) getHandler(entry Entry) http.HandlerFunc {
+func (s *Server) getHandler(entry Entry, router *Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		defer LoggerSync()
@@ -128,13 +127,7 @@ func (s *Server) getHandler(entry Entry) http.HandlerFunc {
 			Response: response,
 		}
 
-		err = s.middlewareHandle(sctx, s.Middlewares)
-		if err != nil {
-			_ = sctx.Response.Json(err)
-			return
-		}
-
-		err = s.middlewareHandle(sctx, entry.middlewares)
+		err = s.middlewareHandle(sctx, mergeMiddleware(router.Middlewares, entry.middlewares))
 		if err != nil {
 			_ = sctx.Response.Json(err)
 			return
@@ -147,4 +140,24 @@ func (s *Server) getHandler(entry Entry) http.HandlerFunc {
 		}
 		return
 	}
+}
+
+func mergeMiddleware(globalMs []Middleware, ms []Middleware) []Middleware {
+
+	isContain := func(splice []Middleware, sub Middleware) bool {
+		for _, v := range splice {
+			if v == sub {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, m := range ms {
+		if !isContain(globalMs, m) {
+			globalMs = append(globalMs, m)
+		}
+	}
+
+	return globalMs
 }
